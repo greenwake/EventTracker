@@ -14,6 +14,9 @@ import hashlib # Şifreleme
 import hmac # Güvenli Karşılaştırma
 from collections import defaultdict, Counter
 import locale
+import webbrowser # Link açmak için
+import requests   # API sorgusu için
+import threading  # Arayüz donmasın diye
 
 # tkcalendar kontrolü
 try:
@@ -31,15 +34,57 @@ except:
     except:
         pass 
 
-# --- SABİTLER VE AYARLAR ---
+# --- AYARLAR ---
 DATA_KLASORU = "Data"
 USERS_DOSYASI = "users.json"
 ESKI_TXT_DOSYA_ADI = "eventList.txt"
 
+
+MEVCUT_SURUM = "v1.0.1"
+GITHUB_KULLANICI = "greenwake" 
+GITHUB_REPO = "EventTracker"       
+
 if not os.path.exists(DATA_KLASORU):
     os.makedirs(DATA_KLASORU)
 
-# --- GÜVENLİ KULLANICI YÖNETİCİSİ (Salt + PBKDF2) ---
+class UpdateManager:
+    @staticmethod
+    def kontrol_et(manuel=False):
+        """
+        GitHub API'sini kontrol eder.
+        manuel=True ise kullanıcı butona basmıştır (Her durumda bilgi ver).
+        manuel=False ise otomatik başlangıçtır (Sadece güncelleme varsa rahatsız et).
+        """
+        def thread_hedefi():
+            try:
+                # GitHub API URL'si
+                url = f"https://api.github.com/repos/{GITHUB_KULLANICI}/{GITHUB_REPO}/releases/latest"
+                response = requests.get(url, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    son_surum = data['tag_name'] # Örn: v1.1.0
+                    indirme_linki = data['html_url'] # Release sayfası
+
+                    if son_surum != MEVCUT_SURUM:
+                        # Ana thread'de mesaj kutusu göster
+                        msg = f"Yeni bir güncelleme mevcut!\n\nMevcut Sürüm: {MEVCUT_SURUM}\nYeni Sürüm: {son_surum}\n\nİndirme sayfasına gitmek ister misiniz?"
+                        cevap = messagebox.askyesno("Güncelleme Mevcut", msg)
+                        if cevap:
+                            webbrowser.open(indirme_linki)
+                    else:
+                        if manuel:
+                            messagebox.showinfo("Durum", f"Uygulamanız güncel.\nSürüm: {MEVCUT_SURUM}")
+                else:
+                    if manuel:
+                        messagebox.showerror("Hata", "Güncelleme bilgisi alınamadı.\nRepo bulunamadı veya gizli.")
+            except Exception as e:
+                if manuel:
+                    messagebox.showerror("Bağlantı Hatası", f"İnternet bağlantısı kurulamadı.\n{e}")
+
+        threading.Thread(target=thread_hedefi, daemon=True).start()
+
+# --- GÜVENLİ KULLANICI YÖNETİCİSİ 
 class UserManager:
     def __init__(self):
         self.users = {}
@@ -58,21 +103,11 @@ class UserManager:
             json.dump(self.users, f, indent=4)
 
     def hash_password(self, password, salt=None):
-        """
-        Şifreyi Tuzlama (Salting) ve PBKDF2 ile güvenli hale getirir.
-        Format: salt_hex:hash_hex
-        """
         if salt is None:
-            # Yeni kayıt için 16 byte'lık rastgele tuz oluştur
             salt = os.urandom(16)
         else:
-            # Giriş kontrolü için mevcut tuzu kullan
             salt = bytes.fromhex(salt)
-
-        # PBKDF2 algoritması: 100.000 iterasyon (Kırılması çok güç)
         pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000)
-        
-        # Salt ve Hash'i birleştirip kaydet (salt olmadan hash doğrulanamaz)
         return f"{salt.hex()}:{pwd_hash.hex()}"
 
     def register(self, username, password):
@@ -80,8 +115,6 @@ class UserManager:
             return False, "Bu kullanıcı adı zaten alınmış."
         if not username or not password:
             return False, "Kullanıcı adı ve şifre boş olamaz."
-        
-        # Şifreyi tuzlayarak kaydet
         self.users[username] = self.hash_password(password)
         self.save_users()
         return True, "Kayıt başarılı."
@@ -89,21 +122,15 @@ class UserManager:
     def login(self, username, password):
         if username not in self.users:
             return False
-        
         stored_data = self.users[username]
         try:
             salt_hex, stored_hash_hex = stored_data.split(':')
-            
-            # Girilen şifreyi, kayıtlı TUZ ile tekrar şifrele
             new_hash_data = self.hash_password(password, salt_hex)
             _, new_hash_hex = new_hash_data.split(':')
-            
-            # Zamanlama saldırılarını önlemek için güvenli karşılaştırma (hmac.compare_digest)
             if hmac.compare_digest(stored_hash_hex, new_hash_hex):
                 return True
         except ValueError:
-            return False # Veri bozulmuşsa giriş yapma
-            
+            return False 
         return False
 
 # --- GİRİŞ EKRANI ---
@@ -119,8 +146,9 @@ class LoginWindow:
         box = tk.Frame(self.frame, bg="white", padx=40, pady=40, relief=tk.RAISED, borderwidth=1)
         box.place(relx=0.5, rely=0.5, anchor="center")
 
-        tk.Label(box, text="Event Tracker v13", font=("Arial", 20, "bold"), bg="white", fg="#455a64").pack(pady=(0, 20))
-        tk.Label(box, text="Güvenli Giriş (Salted SHA256)", font=("Arial", 8), bg="white", fg="green").pack(pady=(0, 10))
+        tk.Label(box, text="Event Tracker", font=("Arial", 20, "bold"), bg="white", fg="#455a64").pack(pady=(0, 5))
+
+        tk.Label(box, text=f"Sürüm: {MEVCUT_SURUM}", font=("Arial", 9), bg="white", fg="gray").pack(pady=(0, 20))
 
         tk.Label(box, text="Kullanıcı Adı:", bg="white", font=("Arial", 10)).pack(anchor="w")
         self.entry_user = tk.Entry(box, width=30, font=("Arial", 11))
@@ -155,14 +183,13 @@ class LoginWindow:
         else:
             messagebox.showerror("Hata", msg)
 
-# --- ANA UYGULAMA (Geri kalan kısım v12 ile aynı mantıkta) ---
 class EtkinlikTakipUygulamasi:
     def __init__(self, root, current_user, logout_callback):
         self.root = root
         self.current_user = current_user
         self.logout_callback = logout_callback
         self.json_dosya_adi = os.path.join(DATA_KLASORU, f"{self.current_user}.json")
-        self.root.title(f"Etkinlik Takip Paneli - Kullanıcı: {self.current_user}")
+        self.root.title(f"Etkinlik Takip Paneli - Kullanıcı: {self.current_user} ({MEVCUT_SURUM})")
         
         self.main_container = tk.Frame(root)
         self.main_container.pack(fill=tk.BOTH, expand=True)
@@ -186,6 +213,8 @@ class EtkinlikTakipUygulamasi:
 
         self.etkinlik_degistir(None)
         self.karsilama_ekrani()
+        
+        UpdateManager.kontrol_et(manuel=False)
 
     def veri_tabanini_yukle(self):
         if os.path.exists(self.json_dosya_adi):
@@ -250,13 +279,17 @@ class EtkinlikTakipUygulamasi:
         tk.Button(self.sidebar, text="Ekle", command=self.tarih_ekle, bg="#4CAF50", fg="white", width=22).pack(pady=5)
         
         ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', padx=10, pady=20)
-        btn_style = {"width": 24, "pady": 4, "bg": "white", "anchor": "w", "padx": 10}
+        btn_style = {"width": 24, "pady": 2, "bg": "white", "anchor": "w", "padx": 10}
         tk.Button(self.sidebar, text="📋 Kayıt Listesi & Düzenle", command=self.veri_yonetimi_goster, **btn_style).pack(pady=2)
         tk.Button(self.sidebar, text="📈 Zaman Çizelgesi", command=self.grafik_goster, **btn_style).pack(pady=2)
         tk.Button(self.sidebar, text="🟩 Yoğunluk Haritası", command=self.isi_haritasi_goster, **btn_style).pack(pady=2)
         tk.Button(self.sidebar, text="📊 Fark Analizi", command=self.fark_grafik_goster, **btn_style).pack(pady=2)
         tk.Button(self.sidebar, text="📊 Alışkanlık Histogramı", command=self.histogram_goster, **btn_style).pack(pady=2)
         tk.Button(self.sidebar, text="📅 Aylık Dağılım", command=self.aylik_ozet_goster, **btn_style).pack(pady=2)
+        
+        ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', padx=10, pady=10)
+        tk.Button(self.sidebar, text="🔄 Güncellemeleri Kontrol Et", command=lambda: UpdateManager.kontrol_et(manuel=True), bg="#e0f7fa", width=24).pack(pady=5)
+
         tk.Button(self.sidebar, text="🚪 Çıkış Yap", command=self.cikis_yap, bg="#ffab91", width=22).pack(side=tk.BOTTOM, pady=20)
         self.lbl_bilgi = tk.Label(self.sidebar, text="", bg="#f0f0f0", fg="blue", wraplength=200); self.lbl_bilgi.pack(side=tk.BOTTOM, pady=5)
 
@@ -265,16 +298,6 @@ class EtkinlikTakipUygulamasi:
         self.lbl_bilgi.config(text=f"Seçili: {self.aktif_etkinlik_adi.get()}", fg="#333")
         self.temizle_sag_panel()
         self.karsilama_ekrani()
-
-    def karsilama_ekrani(self):
-        self.temizle_sag_panel()
-        secili = self.aktif_etkinlik_adi.get()
-        sayi = len(self.tarih_listesi)
-        frame = tk.Frame(self.content_frame, bg="white")
-        frame.place(relx=0.5, rely=0.5, anchor="center")
-        tk.Label(frame, text=f"Hoşgeldin, {self.current_user}!", font=("Arial", 16), bg="white", fg="#607d8b").pack(pady=5)
-        tk.Label(frame, text=f"Aktif Etkinlik: {secili}", font=("Arial", 20, "bold"), bg="white", fg="#333").pack(pady=10)
-        tk.Label(frame, text=f"Toplam Kayıt: {sayi}", font=("Arial", 14), bg="white", fg="#666").pack(pady=5)
 
     def etkinlik_yonetimi_penceresi(self):
         top = tk.Toplevel(self.root); top.title("Etkinlik Yönetimi"); top.geometry("400x400")
@@ -307,6 +330,16 @@ class EtkinlikTakipUygulamasi:
         tk.Button(btn_frame, text="✏️ Düzenle", command=duzenle, bg="#FFC107").pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="🗑️ Sil", command=sil, bg="#F44336", fg="white").pack(side=tk.LEFT, padx=5)
 
+    def karsilama_ekrani(self):
+        self.temizle_sag_panel()
+        secili = self.aktif_etkinlik_adi.get()
+        sayi = len(self.tarih_listesi)
+        frame = tk.Frame(self.content_frame, bg="white")
+        frame.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(frame, text=f"Hoşgeldin, {self.current_user}!", font=("Arial", 16), bg="white", fg="#607d8b").pack(pady=5)
+        tk.Label(frame, text=f"Aktif Etkinlik: {secili}", font=("Arial", 20, "bold"), bg="white", fg="#333").pack(pady=10)
+        tk.Label(frame, text=f"Toplam Kayıt: {sayi}", font=("Arial", 14), bg="white", fg="#666").pack(pady=5)
+
     def temizle_sag_panel(self):
         for widget in self.content_frame.winfo_children(): widget.destroy()
     def grafigi_panele_gom(self, fig):
@@ -330,7 +363,7 @@ class EtkinlikTakipUygulamasi:
     def tarih_ekle(self):
         t_str = self.cal_entry.get_date().strftime("%d.%m.%Y"); akt = self.aktif_etkinlik_adi.get()
         if t_str in self.veriler[akt]: messagebox.showwarning("Bilgi", "Zaten ekli."); return
-        self.veriler[akt].append(t_str); self.json_kaydet(); self.aktif_verileri_yukle(); self.lbl_bilgi.config(text=f"Eklendi: {t_str}", fg="green")
+        self.veriler[akt].append(t_str); self.json_kaydet(); self.aktif_verileri_yukle(); self.lbl_bilgi.config(text=f"Eklendi: {t_str} ({akt})", fg="green")
         if hasattr(self, 'tree_widget') and self.tree_widget.winfo_exists(): self.veri_yonetimi_goster()
 
     def veri_yonetimi_goster(self):
@@ -340,99 +373,158 @@ class EtkinlikTakipUygulamasi:
         bf = tk.Frame(fr, bg="white"); bf.pack(side=tk.RIGHT)
         tk.Button(bf, text="✏️ Düzenle", command=self.kayit_duzenle, bg="#fff0c2").pack(side=tk.LEFT, padx=5)
         tk.Button(bf, text="🗑️ Sil", command=self.kayit_sil, bg="#ffcccc", fg="red").pack(side=tk.LEFT, padx=5)
-        self.tree_widget = ttk.Treeview(self.content_frame, columns=('t','g'), show='headings', height=20)
-        self.tree_widget.heading('t', text='Tarih'); self.tree_widget.heading('g', text='Gün')
-        self.tree_widget.column('t', anchor='center'); self.tree_widget.column('g', anchor='center')
-        sb = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, command=self.tree_widget.yview); self.tree_widget.configure(yscroll=sb.set)
-        sb.pack(side=tk.RIGHT, fill=tk.Y); self.tree_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=20, pady=5)
-        for t in reversed(self.get_filtrelenmis_tarihler()): self.tree_widget.insert('', tk.END, values=(t.strftime("%d.%m.%Y"), t.strftime("%A")))
+        
+        cols = ('tarih', 'gun')
+        self.tree_widget = ttk.Treeview(self.content_frame, columns=cols, show='headings', height=20)
+        self.tree_widget.heading('tarih', text='Tarih'); self.tree_widget.heading('gun', text='Gün')
+        self.tree_widget.column('tarih', width=150, anchor='center'); self.tree_widget.column('gun', width=150, anchor='center')
+        
+        sb = ttk.Scrollbar(self.content_frame, orient=tk.VERTICAL, command=self.tree_widget.yview)
+        self.tree_widget.configure(yscroll=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=20, pady=5)
+        
+        for t in reversed(self.get_filtrelenmis_tarihler()):
+            self.tree_widget.insert('', tk.END, values=(t.strftime("%d.%m.%Y"), t.strftime("%A")))
 
     def kayit_sil(self):
-        sel = self.tree_widget.selection()
-        if not sel: return
-        t_str = self.tree_widget.item(sel, "values")[0]
-        if messagebox.askyesno("Onay", "Silinsin mi?"):
-            akt = self.aktif_etkinlik_adi.get()
-            self.veriler[akt].remove(t_str); self.json_kaydet(); self.aktif_verileri_yukle(); self.veri_yonetimi_goster()
-    def kayit_duzenle(self):
-        sel = self.tree_widget.selection()
-        if not sel: return
-        eski = self.tree_widget.item(sel, "values")[0]
-        top = tk.Toplevel(self.root); top.title("Düzenle"); top.geometry("300x150")
-        tk.Label(top, text=f"Eski: {eski}").pack(pady=10)
-        ent = DateEntry(top, locale='tr_TR'); ent.set_date(datetime.strptime(eski, "%d.%m.%Y")); ent.pack(pady=5)
-        def sav():
-            yeni = ent.get_date().strftime("%d.%m.%Y"); akt = self.aktif_etkinlik_adi.get()
-            self.veriler[akt].remove(eski); self.veriler[akt].append(yeni); self.json_kaydet(); self.aktif_verileri_yukle(); self.veri_yonetimi_goster(); top.destroy()
-        tk.Button(top, text="Kaydet", command=sav, bg="#4CAF50").pack(pady=10)
+        selected = self.tree_widget.selection()
+        if not selected: return
+        tarih_str = self.tree_widget.item(selected, "values")[0]
+        if messagebox.askyesno("Onay", f"{tarih_str} silinsin mi?"):
+            aktif = self.aktif_etkinlik_adi.get()
+            if tarih_str in self.veriler[aktif]:
+                self.veriler[aktif].remove(tarih_str)
+                self.json_kaydet()
+                self.aktif_verileri_yukle()
+                self.veri_yonetimi_goster()
+                self.lbl_bilgi.config(text=f"Silindi: {tarih_str}", fg="red")
 
-    # --- GRAFİKLER ---
+    def kayit_duzenle(self):
+        selected = self.tree_widget.selection()
+        if not selected: return
+        eski_str = self.tree_widget.item(selected, "values")[0]
+        eski_dt = datetime.strptime(eski_str, "%d.%m.%Y")
+        
+        top = tk.Toplevel(self.root)
+        top.title("Düzenle")
+        top.geometry("300x150")
+        tk.Label(top, text=f"Eski: {eski_str}").pack(pady=10)
+        ent = DateEntry(top, width=16, background='darkblue', foreground='white', borderwidth=2, date_pattern='dd.mm.yyyy', locale='tr_TR')
+        ent.set_date(eski_dt)
+        ent.pack(pady=5)
+        
+        def kaydet():
+            yeni_str = ent.get_date().strftime("%d.%m.%Y")
+            aktif = self.aktif_etkinlik_adi.get()
+            if eski_str in self.veriler[aktif]:
+                self.veriler[aktif].remove(eski_str)
+                self.veriler[aktif].append(yeni_str)
+                self.json_kaydet()
+                self.aktif_verileri_yukle()
+                self.veri_yonetimi_goster()
+                top.destroy()
+            else: messagebox.showerror("Hata", "Kayıt bulunamadı.")
+        tk.Button(top, text="Kaydet", command=kaydet, bg="#4CAF50", fg="white").pack(pady=10)
+
     def grafik_goster(self):
-        tl = self.get_filtrelenmis_tarihler()
-        if not tl: messagebox.showerror("Hata", "Veri yok."); return
-        tl.sort(); num = list(range(1, len(tl)+1))
-        fig = Figure(figsize=(12, 7), dpi=100); ax = fig.add_subplot(111)
-        ax.plot(tl, num, marker='o', linestyle='-', zorder=10); ax.grid(True, alpha=0.5)
-        ax.set_title(f"Timeline: {self.aktif_etkinlik_adi.get()}"); ax.text(tl[-1], len(tl), str(len(tl)), ha='right', color='blue', fontweight='bold')
-        sel = self.secilen_yil.get(); tod = datetime.today()
-        if sel=="Tümü" or not sel: s=min(tl); e=tod
-        else: s=datetime(int(sel),1,1); e=min(datetime(int(sel),12,31), tod)
-        ax.set_xlim(s, e)
-        hd = defaultdict(list)
-        for t in tl: hd[t-timedelta(days=t.weekday())].append(t)
-        cur = s - timedelta(days=s.weekday())
-        end_w = e - timedelta(days=e.weekday())
-        ymax = max(num)/2 if num else 10
-        while cur <= end_w:
-            c = len(hd[cur])
-            if c==0: col,a,tx="red",0.05,"Yok"
-            elif c==1: col,a,tx="orange",0.05,"1"
-            elif c==2: col,a,tx="green",0.08,"2"
-            else: col,a,tx="blue",0.1,"3+"
-            ax.axvspan(cur, cur+timedelta(days=6), alpha=a, color=col)
-            ax.text(cur+timedelta(days=3.5), ymax, tx, rotation=90, ha='center', fontsize=8, color=col, alpha=0.7)
-            cur+=timedelta(weeks=1)
-        ax.xaxis.set_major_locator(mdates.MonthLocator()); ax.xaxis.set_major_formatter(mdates.DateFormatter('%B %Y')); fig.autofmt_xdate(); self.grafigi_panele_gom(fig)
+        tarih_listesi = self.get_filtrelenmis_tarihler()
+        if not tarih_listesi: messagebox.showerror("Hata", "Veri yok."); return
+        tarih_listesi.sort()
+        sayilar = list(range(1, len(tarih_listesi) + 1))
+        fig = Figure(figsize=(12, 7), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.plot(tarih_listesi, sayilar, marker='o', linestyle='-', zorder=10)
+        ax.set_title(f"Timeline: {self.aktif_etkinlik_adi.get()} ({self.secilen_yil.get()})")
+        ax.set_ylabel("Toplam Sayı"); ax.grid(True, alpha=0.5)
+        ax.text(tarih_listesi[-1], len(tarih_listesi), f"{len(tarih_listesi)}", fontsize=9, ha='right', color='blue', fontweight='bold')
+        
+        secim = self.secilen_yil.get(); bugun = datetime.today()
+        if secim == "Tümü" or not secim: ilk_tarih = min(tarih_listesi); son_gun = bugun
+        else: yil = int(secim); ilk_tarih = datetime(yil, 1, 1); son_gun = min(datetime(yil, 12, 31), bugun)
+        ax.set_xlim(ilk_tarih, son_gun)
+        
+        ilk_pazartesi = ilk_tarih - timedelta(days=ilk_tarih.weekday())
+        son_pazartesi = son_gun - timedelta(days=son_gun.weekday())
+        hafta_durumu = defaultdict(list)
+        for t in tarih_listesi: hafta_durumu[t - timedelta(days=t.weekday())].append(t)
+        
+        cur = ilk_pazartesi
+        y_txt = max(sayilar)/2 if sayilar else 10
+        while cur <= son_pazartesi:
+            cnt = len(hafta_durumu[cur])
+            if cnt==0: c,a,t="red",0.05,"Yok"
+            elif cnt==1: c,a,t="orange",0.05,"1"
+            elif cnt==2: c,a,t="green",0.08,"2"
+            elif cnt==3: c,a,t="blue",0.08,"3"
+            else: c,a,t="purple",0.1,"4+"
+            ax.axvspan(cur, cur+timedelta(days=6), alpha=a, color=c)
+            ax.text(cur+timedelta(days=3.5), y_txt, t, rotation=90, ha='center', fontsize=8, color=c, fontweight='bold', alpha=0.7)
+            cur += timedelta(weeks=1)
+        
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%B %Y'))
+        fig.autofmt_xdate(rotation=45, ha='right')
+        self.grafigi_panele_gom(fig)
 
     def histogram_goster(self):
-        tl = self.get_filtrelenmis_tarihler()
-        if len(tl)<1: messagebox.showwarning("Uyarı","Veri yok"); return
-        tl.sort(); gps=defaultdict(list); diffs=[]
-        for i in range(1, len(tl)):
-            d=(tl[i]-tl[i-1]).days; 
-            if d>0: diffs.append(d); gps[d].append((tl[i-1], tl[i]))
-        ls=(datetime.today()-tl[-1]).days
-        if ls>0: diffs.append(ls); gps[ls].append((tl[-1], datetime.today()))
-        if not diffs: messagebox.showwarning("Bilgi","Aralık yok"); return
-        c=Counter(diffs); d=sorted(c.keys()); f=[c[k] for k in d]
-        fig=Figure(figsize=(10,6), dpi=100); ax=fig.add_subplot(111)
-        cols=['#66bb6a' if x<=3 else '#ef5350' for x in d]
-        bars=ax.bar(d, f, color=cols, picker=True)
-        ax.set_title("Alışkanlık Sıklığı"); ax.set_xticks(d)
-        for b in bars: ax.text(b.get_x()+b.get_width()/2, b.get_height(), str(int(b.get_height())), ha='center', va='bottom')
-        def pk(ev): 
-            if isinstance(ev.artist, Rectangle): 
-                v=int(round(ev.artist.get_x()+ev.artist.get_width()/2))
-                if v in gps: self.detay_penceresi_goster(v, gps[v])
-        fig.canvas.mpl_connect('pick_event', pk); self.grafigi_panele_gom(fig)
+        tarih_listesi = self.get_filtrelenmis_tarihler()
+        if len(tarih_listesi) < 1: messagebox.showwarning("Uyarı", "Veri yok."); return
+        tarih_listesi.sort()
+        gap_pairs = defaultdict(list); farklar = []
+        for i in range(1, len(tarih_listesi)):
+            diff = (tarih_listesi[i] - tarih_listesi[i-1]).days
+            if diff > 0: farklar.append(diff); gap_pairs[diff].append((tarih_listesi[i-1], tarih_listesi[i]))
+        bugun = datetime.today(); son = tarih_listesi[-1]; diff_son = (bugun - son).days
+        if diff_son > 0: farklar.append(diff_son); gap_pairs[diff_son].append((son, bugun))
+        if not farklar: messagebox.showwarning("Bilgi", "Aralık yok."); return
+        
+        counts = Counter(farklar); days = sorted(counts.keys()); freqs = [counts[d] for d in days]
+        fig = Figure(figsize=(10, 6), dpi=100); ax = fig.add_subplot(111)
+        colors = ['#66bb6a' if d<=3 else '#ffa726' if d<=7 else '#ef5350' for d in days]
+        bars = ax.bar(days, freqs, color=colors, edgecolor='black', alpha=0.8, picker=True)
+        ax.set_title(f"Sıklık: {self.aktif_etkinlik_adi.get()}"); ax.set_xticks(days); ax.grid(True, axis='y', alpha=0.3)
+        for bar in bars: ax.text(bar.get_x()+bar.get_width()/2., bar.get_height(), f'{int(bar.get_height())}', ha='center', va='bottom')
+        
+        def on_pick(event):
+            if isinstance(event.artist, Rectangle):
+                d = int(round(event.artist.get_x() + event.artist.get_width() / 2))
+                if d in gap_pairs: self.detay_penceresi_goster(d, gap_pairs[d])
+        fig.canvas.mpl_connect('pick_event', on_pick)
+        self.grafigi_panele_gom(fig)
 
     def detay_penceresi_goster(self, gun, pairs):
-        top=tk.Toplevel(self.root); top.title(f"{gun} Gün"); top.geometry("400x300")
-        fr=tk.Frame(top); fr.pack(fill=tk.BOTH, expand=True)
-        sb=ttk.Scrollbar(fr, orient=tk.VERTICAL); lb=tk.Listbox(fr, yscrollcommand=sb.set); sb.config(command=lb.yview); sb.pack(side=tk.RIGHT, fill=tk.Y); lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tod=datetime.today().date()
-        for i, (t1,t2) in enumerate(pairs, 1):
-            if t2.date()==tod: lb.insert(tk.END, f"{i}. {t1.strftime('%d.%m')} -> Bugün"); lb.itemconfig(tk.END, {'bg':'#fff9c4'})
+        top = tk.Toplevel(self.root); top.title(f"{gun} Günlük"); top.geometry("400x300")
+        tk.Label(top, text=f"{len(pairs)} Kez, {gun} Gün Ara:", font=("Arial", 11, "bold")).pack(pady=10)
+        fr = tk.Frame(top); fr.pack(fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(fr, orient=tk.VERTICAL); lb = tk.Listbox(fr, yscrollcommand=sb.set, font=("Consolas", 10))
+        sb.config(command=lb.yview); sb.pack(side=tk.RIGHT, fill=tk.Y); lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        today = datetime.today().date()
+        for i, (t1, t2) in enumerate(pairs, 1):
+            if t2.date() == today: lb.insert(tk.END, f"{i}. {t1.strftime('%d.%m')} -> Bugün (GÜNCEL)"); lb.itemconfig(tk.END, {'bg': '#fff9c4'})
             else: lb.insert(tk.END, f"{i}. {t1.strftime('%d.%m')} -> {t2.strftime('%d.%m')}")
 
     def isi_haritasi_goster(self):
-        s=self.secilen_yil.get(); y=datetime.now().year if s=="Tümü" or not s else int(s)
-        l=[t for t in self.tarih_listesi if t.year==y]; c=Counter(t.date() for t in l)
-        st=datetime(y,1,1); en=datetime(y,12,31); x,yy,cl=[],[],[]
-        curr=st
-        while curr<=en: x.append(int(curr.strftime("%W"))); yy.append(6-curr.weekday()); v=c[curr.date()]; cl.append("#ebedf0" if v==0 else "#9be9a8" if v==1 else "#30a14e"); curr+=timedelta(days=1)
-        fig=Figure(figsize=(12,5), dpi=100); ax=fig.add_subplot(111); ax.scatter(x,yy,c=cl,marker='s',s=180); ax.set_title(f"{y} Yoğunluk"); ax.set_aspect('equal')
-        ax.set_yticks([0,2,4,6]); ax.set_yticklabels(["Paz","Cum","Çar","Pzt"]); ax.axis('off'); self.grafigi_panele_gom(fig)
+        secim = self.secilen_yil.get()
+        hedef = datetime.now().year if secim == "Tümü" or not secim else int(secim)
+        liste = [t for t in self.tarih_listesi if t.year == hedef]
+        counts = Counter(t.date() for t in liste)
+        start = datetime(hedef, 1, 1); end = datetime(hedef, 12, 31)
+        xh, yg, clr = [], [], []
+        def get_color(c): return "#ebedf0" if c==0 else "#9be9a8" if c==1 else "#40c463" if c==2 else "#30a14e" if c==3 else "#216e39"
+        cur = start
+        while cur <= end:
+            xh.append(int(cur.strftime("%W"))); yg.append(6 - cur.weekday()); clr.append(get_color(counts[cur.date()])); cur += timedelta(days=1)
+        fig = Figure(figsize=(12, 5), dpi=100); ax = fig.add_subplot(111)
+        ax.scatter(xh, yg, c=clr, marker='s', s=180)
+        ax.set_title(f"{hedef} Yoğunluk (Top: {len(liste)})"); ax.set_yticks([0, 2, 4, 6]); ax.set_yticklabels(["Paz", "Cum", "Çar", "Pzt"])
+        lbls, tcks = [], []
+        for m in range(1, 13): d=datetime(hedef, m, 1); tcks.append(int(d.strftime("%W"))); lbls.append(d.strftime("%b"))
+        ax.set_xticks(tcks); ax.set_xticklabels(lbls); ax.set_aspect('equal')
+        ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False); ax.spines['left'].set_visible(False); ax.spines['bottom'].set_visible(False); ax.tick_params(length=0)
+        patches = [Patch(facecolor=get_color(i), label=str(i) if i<4 else "4+") for i in range(5)]
+        ax.legend(handles=patches, loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=5, frameon=False); fig.subplots_adjust(bottom=0.2)
+        self.grafigi_panele_gom(fig)
 
     def fark_grafik_goster(self):
         self.histogram_goster() # Basitlik için yönlendirme
