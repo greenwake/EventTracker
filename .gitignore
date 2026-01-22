@@ -1,0 +1,9 @@
+# Kullanıcı Verileri
+Data/
+users.json
+
+# Python Derleme Dosyaları (Opsiyonel ama önerilir)
+__pycache__/
+*.spec
+build/
+dist/
