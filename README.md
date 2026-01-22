@@ -27,13 +27,7 @@ Bu proje, verilerinizi güvenli bir şekilde saklar ve size GitHub tarzı yoğun
 -   **Çoklu Etkinlik Takibi:** Spor, Kitap, Yazılım gibi sınırsız sayıda farklı kategori oluşturabilirsiniz.
 -   **CRUD İşlemleri:** Hatalı girilen kayıtları liste üzerinden silebilir veya tarihini düzenleyebilirsiniz.
 -   **Akıllı Göç (Migration):** Eski sürümden kalan `.txt` verilerini otomatik olarak algılar ve JSON formatına dönüştürür.
--   **Otomatik Güncelleme:** Uygulama açıldığında GitHub API üzerinden yeni sürüm olup olmadığını kontrol eder ve kullanıcıyı uyarır.
-
----
-
-## 📸 Ekran Görüntüleri
-
- *![](blob:vscode-webview://0lkg7a8eo2k34oauihonbkobggmflno2p2c7nm4e4sgt76u87o3c/e47e237c-bd60-4c7b-88bb-2864a5a6302d)*![](blob:vscode-webview://0lkg7a8eo2k34oauihonbkobggmflno2p2c7nm4e4sgt76u87o3c/938fdce9-0a8a-4c6d-a2ff-f6f5a42c8544) ![](blob:vscode-webview://0lkg7a8eo2k34oauihonbkobggmflno2p2c7nm4e4sgt76u87o3c/7dc5bdd5-2ecd-4d55-b74d-ee9d49ee2355) ![](blob:vscode-webview://0lkg7a8eo2k34oauihonbkobggmflno2p2c7nm4e4sgt76u87o3c/fb4acd56-59bf-49a1-b13a-b09c869b9ed6) 
+-   **Otomatik Güncelleme:** Uygulama açıldığında GitHub API üzerinden yeni sürüm olup olmadığını kontrol eder ve kullanıcıyı uyarır. 
 
 ---
 
